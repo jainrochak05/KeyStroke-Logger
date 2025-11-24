@@ -1,39 +1,67 @@
-let downTime = {};
-let dwellTimes = [];
-let registerSamples = [];
-const REQUIRED_ATTEMPTS = 5;
+let drawing = false;
+let points = []; // current stroke points
+let mode = null; // "register" or "login"
 
-document.addEventListener("DOMContentLoaded", () => {
-  const box = document.getElementById("typingBox");
-  if (!box) return;
+function initDrawingMode(m) {
+  mode = m;
+  const canvas = document.getElementById("drawCanvas");
+  const ctx = canvas.getContext("2d");
 
-  box.addEventListener("keydown", e => {
-    if (e.key.length === 1) {
-      downTime[e.key] = performance.now();
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-    }
+  canvas.addEventListener("mousedown", e => {
+    drawing = true;
+    points = [];
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    addPoint(e, canvas);
   });
 
-  box.addEventListener("keyup", e => {
-    if (e.key.length === 1 && downTime[e.key]) {
-      let dwell = performance.now() - downTime[e.key];
-      dwellTimes.push(dwell);
+  canvas.addEventListener("mousemove", e => {
+    if (!drawing) return;
+    addPoint(e, canvas);
+    drawStroke(ctx);
+  });
+
+  canvas.addEventListener("mouseup", e => {
+    if (!drawing) return;
+    drawing = false;
+    addPoint(e, canvas);
+    drawStroke(ctx);
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    if (drawing) {
+      drawing = false;
     }
   });
-});
-
-function resetTyped() {
-  dwellTimes = [];
-  downTime = {};
-  const box = document.getElementById("typingBox");
-  if (box) box.value = "";
 }
 
-// ---------- Registration flow: 5 attempts ----------
+function addPoint(e, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const t = performance.now();
+  points.push({ x, y, t });
+}
 
-function registerAttempt() {
+function drawStroke(ctx) {
+  if (points.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.stroke();
+}
+
+function resetCanvas() {
+  const canvas = document.getElementById("drawCanvas");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  points = [];
+}
+
+// ---------------- Registration ---------------- //
+
+function saveRegisterSample() {
   const username = document.getElementById("reg_username")?.value.trim();
   const password = document.getElementById("reg_password")?.value;
 
@@ -41,55 +69,50 @@ function registerAttempt() {
     alert("Enter username and password first.");
     return;
   }
-  if (dwellTimes.length === 0) {
-    alert("Type the password in the box before saving.");
+
+  if (!points || points.length < 5) {
+    alert("Draw a circle first.");
     return;
   }
 
-  const typed = document.getElementById("typingBox").value;
-  if (typed !== password) {
-    if (!confirm("Typed text does not match password. Save anyway?")) {
-      resetTyped();
-      return;
-    }
-  }
-
-  registerSamples.push([...dwellTimes]);
-  resetTyped();
-
-  const info = document.getElementById("attemptInfo");
-  if (info) info.innerText = `Attempts saved: ${registerSamples.length} / ${REQUIRED_ATTEMPTS}`;
-
-  if (registerSamples.length < REQUIRED_ATTEMPTS) {
-    alert("Attempt saved. Type again.");
-    return;
-  }
-
-  // send all attempts to backend
-  fetch("/register_data", {
+  fetch("/register_sample", {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      username: username,
-      password: password,
-      samples: registerSamples
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password, points })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === "saved") {
+        alert("Sample saved!");
+        const info = document.getElementById("sampleInfo");
+        if (info && d.user_samples !== undefined) {
+          info.innerText = "Samples saved: " + d.user_samples;
+        }
+      } else {
+        alert("Error: " + (d.message || JSON.stringify(d)));
+      }
+      resetCanvas();
     })
-  })
-  .then(r => r.json())
-  .then(d => {
-    if (d.status === "registered") {
-      alert("Registration complete! Model updated.");
-      registerSamples = [];
-      if (info) info.innerText = `Attempts saved: 0 / ${REQUIRED_ATTEMPTS}`;
-    } else {
-      alert("Error: " + (d.message || JSON.stringify(d)));
-    }
-  })
-  .catch(() => alert("Registration failed (network error)."));
+    .catch(() => {
+      alert("Network error while saving sample.");
+      resetCanvas();
+    });
 }
 
+function trainModel() {
+  fetch("/train")
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === "trained") {
+        alert("Model trained for users: " + d.users.join(", "));
+      } else {
+        alert("Train error: " + (d.message || JSON.stringify(d)));
+      }
+    })
+    .catch(() => alert("Network error while training model."));
+}
 
-// ---------- Login flow ----------
+// ---------------- Login ---------------- //
 
 function verifyUser() {
   const username = document.getElementById("login_username")?.value.trim();
@@ -99,31 +122,27 @@ function verifyUser() {
     alert("Enter username and password.");
     return;
   }
-  if (dwellTimes.length === 0) {
-    alert("Type your password in the box before clicking Login.");
+  if (!points || points.length < 5) {
+    alert("Draw your circle before clicking Login.");
     return;
   }
 
   fetch("/verify", {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      username: username,
-      password: password,
-      dwell_times: dwellTimes
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password, points })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.result === "success") {
+        alert("Access Granted!");
+      } else {
+        alert("Access Denied! " + (d.predicted || d.reason));
+      }
+      resetCanvas();
     })
-  })
-  .then(r => r.json())
-  .then(d => {
-    if (d.result === "success") {
-      alert("Access Granted!");
-    } else {
-      alert("Access Denied! " + (d.predicted || d.reason));
-    }
-    resetTyped();
-  })
-  .catch(() => {
-    alert("Login failed (network error).");
-    resetTyped();
-  });
+    .catch(() => {
+      alert("Network error during login.");
+      resetCanvas();
+    });
 }

@@ -3,88 +3,128 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 import pickle
 import os
+import math
 
 app = Flask(__name__)
 
 DATA_FILE = "data.csv"
 MODEL_FILE = "model.pkl"
 
-# max number of keys we consider per attempt (password length upper bound)
-MAX_KEYS = 20
+FEATURE_COLS = [
+    "total_length",
+    "duration",
+    "avg_speed",
+    "bbox_width",
+    "bbox_height",
+    "mean_radius",
+    "std_radius",
+    "min_radius",
+    "max_radius",
+    "direction_changes",
+]
 
-# ----------------- Helpers -----------------
 
-def compute_features(dwell):
+# ----------------- Feature extraction from raw points ----------------- #
+
+def compute_features_from_points(points):
     """
-    From a list of dwell times (per key), build a fixed-length feature vector:
-    - dwell_0 ... dwell_(MAX_KEYS-1) (padded with 0 if shorter)
-    - mean_dwell, std_dwell
+    points: list of dicts: [{x:..., y:..., t:...}, ...]
+    Returns dict of features or None if not enough points.
     """
-    if not dwell:
+    if not points or len(points) < 5:
         return None
 
-    dwell = [float(x) for x in dwell]
+    # sort by time
+    pts = sorted(points, key=lambda p: p["t"])
+    xs = [p["x"] for p in pts]
+    ys = [p["y"] for p in pts]
+    ts = [p["t"] for p in pts]
 
-    # pad / truncate to MAX_KEYS
-    if len(dwell) < MAX_KEYS:
-        dwell = dwell + [0.0] * (MAX_KEYS - len(dwell))
+    # total path length
+    total_length = 0.0
+    direction_changes = 0
+    prev_angle = None
+
+    for i in range(1, len(pts)):
+        dx = xs[i] - xs[i - 1]
+        dy = ys[i] - ys[i - 1]
+        dist = math.sqrt(dx * dx + dy * dy)
+        total_length += dist
+
+        angle = math.atan2(dy, dx)
+        if prev_angle is not None:
+            diff = abs(angle - prev_angle)
+            # normalize angle diff to [0, pi]
+            diff = min(diff, 2 * math.pi - diff)
+            if diff > 0.5:  # significant direction change
+                direction_changes += 1
+        prev_angle = angle
+
+    duration = ts[-1] - ts[0]  # ms
+    if duration <= 0:
+        duration = 1.0
+    avg_speed = total_length / duration
+
+    # bounding box
+    bbox_width = max(xs) - min(xs)
+    bbox_height = max(ys) - min(ys)
+
+    # radius around centroid (for circle-ness and personal signature)
+    cx = sum(xs) / len(xs)
+    cy = sum(ys) / len(ys)
+    radii = [math.sqrt((x - cx) ** 2 + (y - cy) ** 2) for x, y in zip(xs, ys)]
+
+    mean_radius = sum(radii) / len(radii)
+    if len(radii) > 1:
+        var = sum((r - mean_radius) ** 2 for r in radii) / (len(radii) - 1)
+        std_radius = math.sqrt(var)
     else:
-        dwell = dwell[:MAX_KEYS]
+        std_radius = 0.0
 
-    mean_dwell = sum(dwell) / len(dwell)
+    min_radius = min(radii)
+    max_radius = max(radii)
 
-    # std dev
-    if len(dwell) > 1:
-        var = sum((x - mean_dwell) ** 2 for x in dwell) / (len(dwell) - 1)
-        std_dwell = var ** 0.5
-    else:
-        std_dwell = 0.0
+    return {
+        "total_length": total_length,
+        "duration": duration,
+        "avg_speed": avg_speed,
+        "bbox_width": bbox_width,
+        "bbox_height": bbox_height,
+        "mean_radius": mean_radius,
+        "std_radius": std_radius,
+        "min_radius": min_radius,
+        "max_radius": max_radius,
+        "direction_changes": direction_changes,
+    }
 
-    feats = {}
-    for i in range(MAX_KEYS):
-        feats[f"dwell_{i}"] = dwell[i]
 
-    feats["mean_dwell"] = mean_dwell
-    feats["std_dwell"] = std_dwell
-    return feats
+# ----------------- Data utilities ----------------- #
+
+def empty_df():
+    return pd.DataFrame(columns=FEATURE_COLS + ["user", "password"])
 
 
 def load_data():
-    """Safely load dataset; handle empty or missing file."""
     if os.path.exists(DATA_FILE):
         try:
             return pd.read_csv(DATA_FILE)
         except pd.errors.EmptyDataError:
-            return pd.DataFrame(columns=feature_columns() + ["user", "password"])
-    else:
-        return pd.DataFrame(columns=feature_columns() + ["user", "password"])
+            return empty_df()
+    return empty_df()
 
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
 
 
-def feature_columns():
-    """List of all feature columns used by the model."""
-    cols = [f"dwell_{i}" for i in range(MAX_KEYS)]
-    cols += ["mean_dwell", "std_dwell"]
-    return cols
-
-
-def train_global_model(df):
-    """Train multi-user model on all samples."""
+def train_model(df):
     if df.empty:
         return None
-
-    X = df[feature_columns()]
+    X = df[FEATURE_COLS]
     y = df["user"]
-
     model = RandomForestClassifier()
     model.fit(X, y)
-
-    # store feature names explicitly
-    model.feature_names_in_ = list(X.columns)
-
+    model.feature_names_in_ = FEATURE_COLS
     with open(MODEL_FILE, "wb") as f:
         pickle.dump(model, f)
     return model
@@ -97,57 +137,58 @@ def load_model():
         return pickle.load(f)
 
 
-# ----------------- API: Register user -----------------
+# ----------------- API: Register samples ----------------- #
 
-@app.route("/register_data", methods=["POST"])
-def register_data():
+@app.route("/register_sample", methods=["POST"])
+def register_sample():
     """
     Body JSON:
     {
       "username": "...",
       "password": "...",
-      "samples": [
-         [dwell1, dwell2, ...],  # attempt 1
-         ...
-      ]
+      "points": [{x:..., y:..., t:...}, ...]
     }
     """
     data = request.json
     username = data.get("username", "").strip()
     password = data.get("password", "")
-    samples = data.get("samples", [])
+    points = data.get("points", [])
 
     if not username or not password:
         return jsonify({"status": "error", "message": "username and password required"}), 400
-    if len(samples) < 1:
-        return jsonify({"status": "error", "message": "no samples provided"}), 400
+
+    feats = compute_features_from_points(points)
+    if feats is None:
+        return jsonify({"status": "error", "message": "not enough drawing data"}), 400
 
     df = load_data()
-    rows = []
+    feats["user"] = username
+    feats["password"] = password
 
-    for s in samples:
-        feats = compute_features(s)
-        if feats is None:
-            continue
-        feats["user"] = username
-        feats["password"] = password  # stored plain (for project simplicity)
-        rows.append(feats)
+    df_new = pd.concat([df, pd.DataFrame([feats])], ignore_index=True)
+    save_data(df_new)
 
-    if not rows:
-        return jsonify({"status": "error", "message": "no valid samples"}), 400
+    # Count samples for that user
+    count = df_new[df_new["user"] == username].shape[0]
 
-    df_new = pd.DataFrame(rows)
-    df_all = pd.concat([df, df_new], ignore_index=True)
-    save_data(df_all)
-
-    # train/update global model
-    model = train_global_model(df_all)
-
-    users = sorted(df_all["user"].unique().tolist())
-    return jsonify({"status": "registered", "users": users, "samples_added": len(rows)})
+    return jsonify({"status": "saved", "user_samples": count})
 
 
-# ----------------- API: Verify login -----------------
+# ----------------- API: Train model ----------------- #
+
+@app.route("/train", methods=["GET"])
+def train_endpoint():
+    df = load_data()
+    if df.empty:
+        return jsonify({"status": "error", "message": "no data to train"}), 400
+    model = train_model(df)
+    if model is None:
+        return jsonify({"status": "error", "message": "training failed"}), 500
+    users = sorted(df["user"].unique().tolist())
+    return jsonify({"status": "trained", "users": users})
+
+
+# ----------------- API: Verify login ----------------- #
 
 @app.route("/verify", methods=["POST"])
 def verify():
@@ -156,66 +197,61 @@ def verify():
     {
       "username": "...",
       "password": "...",
-      "dwell_times": [ ... ]
+      "points": [{x:..., y:..., t:...}, ...]
     }
     """
     data = request.json
     username = data.get("username", "").strip()
     password = data.get("password", "")
-    dwell = data.get("dwell_times", [])
+    points = data.get("points", [])
 
     if not username or not password:
         return jsonify({"result": "fail", "reason": "missing_credentials"}), 400
 
-    feats = compute_features(dwell)
+    feats = compute_features_from_points(points)
     if feats is None:
-        return jsonify({"result": "fail", "reason": "no_keystroke_data"}), 400
+        return jsonify({"result": "fail", "reason": "no_drawing_data"}), 400
 
     df = load_data()
     if df.empty:
         return jsonify({"result": "fail", "reason": "no_registered_users"}), 200
 
-    # Check if user exists
     df_user = df[df["user"] == username]
     if df_user.empty:
         return jsonify({"result": "fail", "reason": "unknown_user"}), 200
 
-    # Check password match (using first stored password for user)
     stored_password = df_user["password"].iloc[0]
     if password != stored_password:
         return jsonify({"result": "fail", "reason": "wrong_password"}), 200
 
-    # Load or train model
     model = load_model()
     if model is None:
-        model = train_global_model(df)
+        model = train_model(df)
         if model is None:
             return jsonify({"result": "fail", "reason": "model_not_ready"}), 200
 
-    # Prepare feature row
     X = pd.DataFrame([feats])
-
-    needed = list(model.feature_names_in_) if hasattr(model, "feature_names_in_") else feature_columns()
-    for col in needed:
+    # ensure columns align
+    for col in FEATURE_COLS:
         if col not in X.columns:
             X[col] = 0.0
-    X = X[needed]
+    X = X[FEATURE_COLS]
 
     predicted_user = model.predict(X)[0]
 
     if predicted_user == username:
-        # success → add this sample to dataset and retrain model
+        # optional: enhance dataset with this new successful sample
         feats["user"] = username
         feats["password"] = stored_password
         df_new = pd.concat([df, pd.DataFrame([feats])], ignore_index=True)
         save_data(df_new)
-        train_global_model(df_new)
+        train_model(df_new)
         return jsonify({"result": "success", "predicted": predicted_user}), 200
     else:
         return jsonify({"result": "fail", "predicted": predicted_user}), 200
 
 
-# ----------------- Pages -----------------
+# ----------------- Pages ----------------- #
 
 @app.route("/")
 def home():

@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Register - Keystroke Auth</title>
+  <title>Register - Circle Pattern Auth</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -14,23 +14,21 @@
   <label>Password</label>
   <input id="reg_password" type="password" placeholder="Choose password" />
 
-  <p>Now type the same password <strong>5 times</strong> in the box below.</p>
-  <p class="hint">Type it normally, press Enter at the end of each attempt or click "Save Attempt".</p>
+  <p>Draw a circle on the canvas below. Try to draw it similarly every time.</p>
+  <p class="hint">Draw and release the mouse to complete one sample. Then click "Save Sample".</p>
 
-  <h3>Password to type: <span id="reg_pass_display">(will show after you enter password)</span></h3>
+  <canvas id="drawCanvas" width="400" height="300"></canvas>
 
-  <input id="typingBox" placeholder="Type password here..." />
+  <div style="margin-top:12px;">
+    <button onclick="saveRegisterSample()">Save Sample</button>
+    <button onclick="trainModel()">Train Model</button>
+  </div>
 
-  <button onclick="registerAttempt()">Save Attempt</button>
-
-  <p id="attemptInfo">Attempts saved: 0 / 5</p>
+  <p id="sampleInfo">Samples saved: 0</p>
 
   <script src="/static/script.js"></script>
   <script>
-    // Show password under "Password to type" (for demo only; not secure for production)
-    document.getElementById("reg_password").addEventListener("input", function() {
-      document.getElementById("reg_pass_display").innerText = this.value || "(enter password above)";
-    });
+    initDrawingMode("register");
   </script>
 </body>
 </html>

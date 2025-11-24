@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Login - Keystroke Auth</title>
+  <title>Login - Circle Pattern Auth</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -14,12 +14,17 @@
   <label>Password</label>
   <input id="login_password" type="password" placeholder="Password" />
 
-  <p>Type your password once in the box below exactly as above.</p>
+  <p>Draw your circle in the canvas below as you did during registration.</p>
 
-  <input id="typingBox" placeholder="Type password here..." />
+  <canvas id="drawCanvas" width="400" height="300"></canvas>
 
-  <button onclick="verifyUser()">Login</button>
+  <div style="margin-top:12px;">
+    <button onclick="verifyUser()">Login</button>
+  </div>
 
   <script src="/static/script.js"></script>
+  <script>
+    initDrawingMode("login");
+  </script>
 </body>
 </html>
