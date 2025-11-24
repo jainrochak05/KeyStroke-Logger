@@ -1,30 +1,17 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <title>Login - Circle Pattern Auth</title>
-  <link rel="stylesheet" href="/static/style.css">
-</head>
+<head><meta charset="utf-8"><title>Login</title>
+<link rel="stylesheet" href="/static/style.css"></head>
 <body>
-  <h2>User Login</h2>
-
-  <label>Username</label>
-  <input id="login_username" placeholder="Username" />
-
-  <label>Password</label>
-  <input id="login_password" type="password" placeholder="Password" />
-
-  <p>Draw your circle in the canvas below as you did during registration.</p>
-
-  <canvas id="drawCanvas" width="400" height="300"></canvas>
-
-  <div style="margin-top:12px;">
+  <h2>Login</h2>
+  <label>Username</label><input id="login_username" /><br/>
+  <label>Password</label><input id="login_password" type="password" /><br/>
+  <p>Draw your signature as you registered.</p>
+  <canvas id="drawCanvas" width="600" height="200"></canvas>
+  <div>
     <button onclick="verifyUser()">Login</button>
+    <button onclick="clearCanvas()">Clear</button>
   </div>
-
   <script src="/static/script.js"></script>
-  <script>
-    initDrawingMode("login");
-  </script>
-</body>
-</html>
+  <script>initDrawer('login');</script>
+</body></html>

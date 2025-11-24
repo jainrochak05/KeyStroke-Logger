@@ -1,34 +1,19 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <title>Register - Circle Pattern Auth</title>
-  <link rel="stylesheet" href="/static/style.css">
-</head>
+<head><meta charset="utf-8"><title>Register</title>
+<link rel="stylesheet" href="/static/style.css"></head>
 <body>
-  <h2>Register New User</h2>
-
-  <label>Username</label>
-  <input id="reg_username" placeholder="Enter username" />
-
-  <label>Password</label>
-  <input id="reg_password" type="password" placeholder="Choose password" />
-
-  <p>Draw a circle on the canvas below. Try to draw it similarly every time.</p>
-  <p class="hint">Draw and release the mouse to complete one sample. Then click "Save Sample".</p>
-
-  <canvas id="drawCanvas" width="400" height="300"></canvas>
-
-  <div style="margin-top:12px;">
-    <button onclick="saveRegisterSample()">Save Sample</button>
+  <h2>Register</h2>
+  <label>Username</label><input id="reg_username" /><br/>
+  <label>Password</label><input id="reg_password" type="password" /><br/>
+  <p>Draw your signature in the canvas below. Save multiple samples.</p>
+  <canvas id="drawCanvas" width="600" height="200"></canvas>
+  <div>
+    <button onclick="saveSample()">Save Sample</button>
     <button onclick="trainModel()">Train Model</button>
+    <button onclick="clearCanvas()">Clear</button>
   </div>
-
-  <p id="sampleInfo">Samples saved: 0</p>
-
-  <script src="/static/script.js"></script>
-  <script>
-    initDrawingMode("register");
-  </script>
-</body>
-</html>
+  <p id="saved">Saved: 0</p>
+<script src="/static/script.js"></script>
+<script>initDrawer('register');</script>
+</body></html>
